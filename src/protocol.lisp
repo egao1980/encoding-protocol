@@ -26,6 +26,8 @@
              ((:base32 :b32) :base32)
              ((:base32hex :base32-hex :b32hex) :base32hex)
              ((:base16 :hex :hexadecimal) :base16)
+             ((:quoted-printable :qp) :quoted-printable)
+             ((:rle :run-length) :rle)
              (otherwise kw))))
     (etypecase encoding
       (null :base64)
@@ -35,12 +37,21 @@
                              :keyword)))
       (symbol (from-keyword (intern (symbol-name encoding) :keyword))))))
 
-(defun %effective-encoding (encoding)
-  (find-rfc4648-spec
-   (normalize-encoding
-    (or encoding
-        (and *encoding-backend* (encoding-backend-encoding *encoding-backend*))
-        *encoding*))))
+(defun %resolved-encoding (encoding)
+  (normalize-encoding
+   (or encoding
+       (and *encoding-backend* (encoding-backend-encoding *encoding-backend*))
+       *encoding*)))
+
+(defun %encoding-family (encoding)
+  (case encoding
+    ((:base64 :base64url :base32 :base32hex :base16) :rfc4648)
+    (:quoted-printable :quoted-printable)
+    (:rle :rle)
+    (otherwise
+     (error 'encoding-unknown-encoding
+            :encoding encoding
+            :message "unknown encoding"))))
 
 (defun %effective-pad (pad pad-p)
   (cond
@@ -54,32 +65,57 @@
     (*encoding-backend* (encoding-backend-strict *encoding-backend*))
     (t nil)))
 
-(defun encode (value &key (encoding nil encoding-p) (pad t pad-p) stream)
-  "Octets or UTF-8 string → RFC 4648 text. ENCODING is :base64 (default),
-   :base64url, :base32, :base32hex, or :base16. PAD defaults to T (canonical)."
+(defun encode (value &key (encoding nil encoding-p) (pad t pad-p)
+                       (columns nil columns-p) stream)
+  "Encode VALUE. :base64 / :base64url / :base32 / :base32hex / :base16 → text
+   (PAD T is RFC-canonical; COLUMNS wraps with CRLF). :quoted-printable → text
+   (COLUMNS default 76). :rle → octet vector (count,value pairs, count 1–255)."
   (declare (ignore encoding-p))
-  (let* ((spec (%effective-encoding encoding))
-         (text (%encode-octets (%as-octets value) spec
-                               :pad (%effective-pad pad pad-p))))
-    (if stream
-        (progn (write-string text stream) text)
-        text)))
+  (let* ((enc (%resolved-encoding encoding))
+         (octets (%as-octets value))
+         (out (ecase (%encoding-family enc)
+                (:rfc4648
+                 (%wrap-columns
+                  (%encode-octets octets (or (find-rfc4648-spec enc)
+                                             (error 'encoding-unknown-encoding
+                                                    :encoding enc))
+                                  :pad (%effective-pad pad pad-p))
+                  columns))
+                (:quoted-printable
+                 (%encode-quoted-printable octets
+                                           :columns (if columns-p columns 76)))
+                (:rle (%encode-rle octets)))))
+    (cond
+      ((null stream) out)
+      ((stringp out) (write-string out stream) out)
+      (t (write-sequence out stream) out))))
 
 (defun decode (source &key (encoding nil encoding-p) (pad t pad-p)
                         (strict nil strict-p))
-  "RFC 4648 text (string, ASCII octets, or character stream) → octets.
-   Whitespace is ignored unless STRICT. Missing pad is accepted unless STRICT
-   and PAD are both true."
+  "Decode SOURCE → octets.
+   RFC 4648: text / ASCII octets / character stream; whitespace ignored unless STRICT.
+   :quoted-printable: same. :rle: octet vector of (count,value) pairs."
   (declare (ignore encoding-p))
-  (%decode-string (%as-ascii-string source)
-                  (%effective-encoding encoding)
-                  :pad (%effective-pad pad pad-p)
-                  :strict (%effective-strict strict strict-p)))
+  (let ((enc (%resolved-encoding encoding)))
+    (ecase (%encoding-family enc)
+      (:rfc4648
+       (%decode-string (%as-ascii-string source)
+                       (or (find-rfc4648-spec enc)
+                           (error 'encoding-unknown-encoding :encoding enc))
+                       :pad (%effective-pad pad pad-p)
+                       :strict (%effective-strict strict strict-p)))
+      (:quoted-printable
+       (%decode-quoted-printable (%as-ascii-string source)))
+      (:rle
+       (%decode-rle (%as-octets source))))))
 
-(defun encode-to-octets (value &key encoding (pad t pad-p))
-  (babel:string-to-octets
-   (apply #'encode value :encoding encoding (when pad-p (list :pad pad)))
-   :encoding :ascii))
+(defun encode-to-octets (value &key encoding (pad t pad-p) columns)
+  (let ((encoded (apply #'encode value :encoding encoding
+                        (append (when pad-p (list :pad pad))
+                                (when columns (list :columns columns))))))
+    (if (and (vectorp encoded) (not (stringp encoded)))
+        encoded
+        (babel:string-to-octets encoded :encoding :ascii))))
 
 (defun decode-octets (octets &key encoding (pad t pad-p) (strict nil strict-p))
   (apply #'decode octets :encoding encoding

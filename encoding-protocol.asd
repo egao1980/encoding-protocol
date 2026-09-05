@@ -1,6 +1,6 @@
 (defsystem "encoding-protocol"
-  :version "0.1.0"
-  :description "RFC 4648 Base16/32/64 encode/decode for cl-stack; implements serdes-protocol :base64 / :base64url / :base32 / :base32hex / :base16"
+  :version "0.1.1"
+  :description "Transfer encodings for cl-stack (RFC 4648, quoted-printable, RLE); serdes :base64 / :base32 / :base16 / :rle / :quoted-printable"
   :author "egao1980"
   :license "MIT"
   :depends-on ("babel" "serdes-protocol")
@@ -9,6 +9,8 @@
   :components ((:file "package")
                (:file "conditions")
                (:file "codec")
+               (:file "rle")
+               (:file "quoted-printable")
                (:file "protocol")
                (:file "serdes"))
   :in-order-to ((test-op (test-op "encoding-protocol/tests"))))

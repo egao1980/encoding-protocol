@@ -55,10 +55,22 @@
         (%spec :base16 +base16-alphabet+ 4 2 :fold-case t)))
 
 (defun find-rfc4648-spec (encoding)
-  (or (find encoding *rfc4648-specs* :key #'rfc4648-spec-name :test #'eq)
-      (error 'encoding-unknown-encoding
-             :encoding encoding
-             :message "not an RFC 4648 encoding")))
+  (find encoding *rfc4648-specs* :key #'rfc4648-spec-name :test #'eq))
+
+(defun %wrap-columns (string columns &key (break (format nil "~C~C" #\Return #\Newline)))
+  "Insert BREAK every COLUMNS characters. No trailing break."
+  (cond
+    ((or (null columns) (not (plusp columns)) (< (length string) columns))
+     string)
+    (t
+     (let ((out (make-string-output-stream))
+           (n (length string)))
+       (loop for i from 0 below n by columns
+             for end = (min n (+ i columns))
+             do (write-string string out :start i :end end)
+                (when (< end n)
+                  (write-string break out)))
+       (get-output-stream-string out)))))
 
 (defun %whitespace-p (c)
   (or (char= c #\Space) (char= c #\Tab)

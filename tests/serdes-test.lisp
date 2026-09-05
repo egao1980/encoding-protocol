@@ -1,7 +1,8 @@
 (in-package #:encoding-protocol/tests)
 
 (deftest serdes-formats
-  (dolist (fmt '(:base64 :base64url :base32 :base32hex :base16 :hex))
+  (dolist (fmt '(:base64 :base64url :base32 :base32hex :base16 :hex
+                 :quoted-printable :rle))
     (ok (serdes-protocol:find-backend fmt) (string fmt))))
 
 (deftest serdes-base64-roundtrip
@@ -21,3 +22,10 @@
   (let ((wire (encode-to-octets (utf8 "f") :encoding :base64)))
     (ok (equalp (babel:string-to-octets "Zg==" :encoding :ascii) wire))
     (ok (equalp (utf8 "f") (decode-octets wire :encoding :base64)))))
+
+(deftest serdes-rle-roundtrip
+  (let* ((raw (coerce #(9 9 8) '(vector (unsigned-byte 8))))
+         (wire (serdes-protocol:encode raw :format :rle))
+         (back (serdes-protocol:decode wire :format :rle)))
+    (ok (equalp #(2 9 1 8) wire))
+    (ok (equalp raw back))))

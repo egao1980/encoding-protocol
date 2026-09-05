@@ -77,6 +77,12 @@
              (backend (make-rfc4648-serdes-backend :encoding encoding)))
         (apply #'serdes-protocol:register-format format backend
                (when media (list :media-type media))))))
+  (serdes-protocol:register-format :quoted-printable
+                                   (make-rfc4648-serdes-backend :encoding :quoted-printable)
+                                   :media-type "quoted-printable")
+  (serdes-protocol:register-format :rle
+                                   (make-rfc4648-serdes-backend :encoding :rle)
+                                   :binary t)
   (use-encoding-backend :encoding :base64))
 
 (%install-formats)

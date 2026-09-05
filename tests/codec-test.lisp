@@ -80,7 +80,36 @@
                                    :encoding :base64))))
 
 (deftest unknown-encoding
-  (ok (signals (encode #(1) :encoding :quoted-printable) 'encoding-unknown-encoding)))
+  (ok (signals (encode #(1) :encoding :nope) 'encoding-unknown-encoding)))
+
+(deftest wrap-columns
+  (ok (string= (format nil "AB~C~CCD" #\Return #\Newline)
+               (encode (coerce #(#xab #xcd) '(vector (unsigned-byte 8)))
+                       :encoding :base16 :columns 2))))
+
+(deftest rle-byte
+  (let* ((raw (coerce #(1 1 1 2 2 3) '(vector (unsigned-byte 8))))
+         (wire (encode raw :encoding :rle)))
+    (ok (equalp #(3 1 2 2 1 3) wire))
+    (ok (equalp raw (decode wire :encoding :rle))))
+  (ok (equalp #() (encode #() :encoding :rle)))
+  (let* ((long (make-array 300 :element-type '(unsigned-byte 8) :initial-element 7))
+         (wire (encode long :encoding :rle)))
+    (ok (equalp #(255 7 45 7) wire))
+    (ok (equalp long (decode wire :encoding :rle)))))
+
+(deftest rle-runs-api
+  (ok (equal '((3 . 1) (2 . :x)) (rle-runs #(1 1 1 :x :x))))
+  (ok (equalp #(1 1 1 :x :x) (expand-rle-runs '((3 . 1) (2 . :x))))))
+
+(deftest quoted-printable
+  (ok (string= "=3D" (encode #(61) :encoding :quoted-printable :columns nil)))
+  (ok (equalp #(61) (decode "=3D" :encoding :quoted-printable)))
+  (let* ((raw (babel:string-to-octets (format nil "a=~C~%b" #\Space) :encoding :utf-8))
+         (qp (encode raw :encoding :qp))
+         (back (decode qp :encoding :quoted-printable)))
+    (ok (find #\= qp :test #'char=))
+    (ok (equalp raw back))))
 
 (deftest invalid-char-restarts
   (ok (signals (decode "Zg?=" :encoding :base64) 'encoding-decode-error))

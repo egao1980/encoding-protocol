@@ -1,0 +1,87 @@
+(in-package #:encoding-protocol)
+
+;;; RFC 2045 quoted-printable. COLUMNS nil = no soft wraps.
+
+(defun %qp-hex (n)
+  (char "0123456789ABCDEF" n))
+
+(defun %hex-digit-p (char)
+  (or (char<= #\0 char #\9)
+      (char<= #\A char #\F)
+      (char<= #\a char #\f)))
+
+(defun %hex-byte (a b)
+  (let ((hi (digit-char-p a 16))
+        (lo (digit-char-p b 16)))
+    (logior (ash hi 4) lo)))
+
+(defun %encode-quoted-printable (octets &key (columns 76))
+  (let ((out (make-string-output-stream))
+        (col 0)
+        (limit (if (and columns (plusp columns)) columns nil)))
+    (labels ((soft-break ()
+               (write-char #\= out)
+               (write-char #\Return out)
+               (write-char #\Newline out)
+               (setf col 0))
+             (need (n)
+               (when (and limit (>= (+ col n) (1- limit)))
+                 (soft-break)))
+             (emit-raw (char)
+               (need 1)
+               (write-char char out)
+               (incf col))
+             (emit-encoded (byte)
+               (need 3)
+               (write-char #\= out)
+               (write-char (%qp-hex (ash byte -4)) out)
+               (write-char (%qp-hex (logand byte 15)) out)
+               (incf col 3)))
+      (loop for i from 0 below (length octets)
+            for b = (aref octets i)
+            do (cond
+                 ((or (<= 33 b 60) (<= 62 b 126))
+                  (emit-raw (code-char b)))
+                 ((or (= b 9) (= b 32))
+                  (let ((last-on-line
+                          (or (= (1+ i) (length octets))
+                              (and (< (1+ i) (length octets))
+                                   (or (= (aref octets (1+ i)) 13)
+                                       (= (aref octets (1+ i)) 10))))))
+                    (if last-on-line
+                        (emit-encoded b)
+                        (emit-raw (code-char b)))))
+                 ((or (= b 13) (= b 10))
+                  (write-char (code-char b) out)
+                  (setf col 0))
+                 (t (emit-encoded b))))
+      (get-output-stream-string out))))
+
+(defun %decode-quoted-printable (text)
+  (let ((octets (make-array (length text) :element-type '(unsigned-byte 8)
+                            :fill-pointer 0))
+        (i 0)
+        (n (length text)))
+    (loop while (< i n)
+          do (let ((c (char text i)))
+               (cond
+                 ((char= c #\=)
+                  (let ((a (if (< (1+ i) n) (char text (1+ i)) nil))
+                        (b (if (< (+ i 2) n) (char text (+ i 2)) nil)))
+                    (cond
+                      ((and a (or (char= a #\Return) (char= a #\Newline)))
+                       (incf i (if (and (char= a #\Return) b (char= b #\Newline)) 3 2)))
+                      ((and a b (%hex-digit-p a) (%hex-digit-p b))
+                       (vector-push (%hex-byte a b) octets)
+                       (incf i 3))
+                      (t
+                       (error 'encoding-decode-error
+                              :character c
+                              :message "invalid quoted-printable escape")))))
+                 ((or (char= c #\Return) (char= c #\Newline))
+                  (vector-push (char-code c) octets)
+                  (incf i))
+                 (t
+                  (vector-push (char-code c) octets)
+                  (incf i)))))
+    (coerce octets '(vector (unsigned-byte 8)))))

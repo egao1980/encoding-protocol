@@ -23,6 +23,8 @@
            #:decode
            #:encode-to-octets
            #:decode-octets
+           #:rle-runs
+           #:expand-rle-runs
 
            #:rfc4648-serdes-backend
            #:make-rfc4648-serdes-backend
