@@ -4,4 +4,4 @@
 (in-package #:encoding-protocol/tests)
 
 (defun utf8 (string)
-  (babel:string-to-octets string :encoding :utf-8))
+  (encode string))

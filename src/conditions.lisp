@@ -16,3 +16,10 @@
              (format s "Unknown encoding ~S~@[: ~A~]"
                      (encoding-unknown-encoding-encoding c)
                      (encoding-error-message c)))))
+
+(define-condition encoding-transcode-error (encoding-error)
+  ((encoding :initarg :encoding :reader encoding-transcode-error-encoding :initform nil))
+  (:report (lambda (c s)
+             (format s "Transcode error~@[ (~S)~]~@[: ~A~]"
+                     (encoding-transcode-error-encoding c)
+                     (encoding-error-message c)))))

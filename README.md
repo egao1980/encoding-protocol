@@ -1,17 +1,26 @@
 # encoding-protocol
 
-Transfer encodings for [cl-stack](https://github.com/egao1980/cl-stack): RFC 4648 (Base16/32/64), RFC 2045 quoted-printable, and classic byte RLE.
+Text encodings (Babel, default **UTF-8**) and transfer encodings for [cl-stack](https://github.com/egao1980/cl-stack): RFC 4648 (Base16/32/64), RFC 2045 quoted-printable, and classic byte RLE.
+
+One `encode` / `decode` GF pair. Family decides polarity:
+
+- **`:text`** (`:utf-8` default, `:ascii`, `:iso-8859-1`, plus any Babel charset) — string → bytes
+- **RFC 4648 / QP** — bytes → string (pass `:encoding` explicitly)
+- **`:rle`** — octets → octets
 
 Not HTTP `Content-Encoding` (gzip / br / zstd / snappy). MIME CTE line-wrapping is `:columns 76` on encode. Parquet hybrid RLE/bit-packing stays in `arrow-protocol`.
 
-Load `encoding-protocol/serdes` to register [`serdes-protocol`](https://github.com/egao1980/serdes-protocol) `:base64` `:base64url` `:base32` `:base32hex` `:base16` (`:hex` alias) `:quoted-printable` `:rle`. The core system depends only on Babel.
+Load `encoding-protocol/serdes` to register [`serdes-protocol`](https://github.com/egao1980/serdes-protocol) `:base64` `:base64url` `:base32` `:base32hex` `:base16` (`:hex` alias) `:quoted-printable` `:rle`. The core system depends only on Babel (implementation, not a consumer API).
 
 ```lisp
 (asdf:load-system "encoding-protocol")   ; nick stack-encoding
 
-(stack-encoding:encode #(102 111 111) :encoding :base64)          ; "Zm9v"
-(stack-encoding:decode "Zm9v" :encoding :base64)                  ; #(102 111 111)
-(stack-encoding:encode "f" :encoding :base32)                     ; "MY======"
+(stack-encoding:encode "hello")                           ; UTF-8 octets
+(stack-encoding:decode #(104 101 108 108 111))            ; "hello"
+
+(stack-encoding:encode #(102 111 111) :encoding :base64)  ; "Zm9v"
+(stack-encoding:decode "Zm9v" :encoding :base64)          ; #(102 111 111)
+(stack-encoding:encode "f" :encoding :base32)             ; "MY======"
 (stack-encoding:encode #(#xff #xef) :encoding :base64url :pad nil) ; "_-8"
 
 (serdes-protocol:encode #(1 2 3) :format :base64)

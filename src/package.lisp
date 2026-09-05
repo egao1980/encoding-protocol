@@ -5,8 +5,10 @@
            #:encoding-encode-error
            #:encoding-decode-error
            #:encoding-unknown-encoding
+           #:encoding-transcode-error
            #:encoding-error-message
            #:encoding-unknown-encoding-encoding
+           #:encoding-transcode-error-encoding
            #:encoding-decode-error-character
 
            #:encoding-backend
