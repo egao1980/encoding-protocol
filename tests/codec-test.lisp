@@ -76,11 +76,12 @@
 
 (deftest string-input-utf8
   (ok (string= "Zm9v" (encode "foo" :encoding :base64)))
-  (ok (equalp (utf8 "foo") (decode (babel:string-to-octets "Zm9v" :encoding :ascii)
+  (ok (equalp (utf8 "foo") (decode (encode "Zm9v" :encoding :ascii)
                                    :encoding :base64))))
 
 (deftest unknown-encoding
-  (ok (signals (encode #(1) :encoding :nope) 'encoding-unknown-encoding)))
+  (ok (signals (encode "hi" :encoding :nope) 'encoding-transcode-error))
+  (ok (signals (encode #(1)) 'encoding-encode-error)))
 
 (deftest wrap-columns
   (ok (string= (format nil "AB~C~CCD" #\Return #\Newline)
@@ -105,7 +106,7 @@
 (deftest quoted-printable
   (ok (string= "=3D" (encode #(61) :encoding :quoted-printable :columns nil)))
   (ok (equalp #(61) (decode "=3D" :encoding :quoted-printable)))
-  (let* ((raw (babel:string-to-octets (format nil "a=~C~%b" #\Space) :encoding :utf-8))
+  (let* ((raw (encode (format nil "a=~C~%b" #\Space)))
          (qp (encode raw :encoding :qp))
          (back (decode qp :encoding :quoted-printable)))
     (ok (find #\= qp :test #'char=))
@@ -121,7 +122,21 @@
     (ok (equalp (utf8 "f") out))))
 
 (deftest normalize
+  (ok (eq :utf-8 (normalize-encoding nil)))
+  (ok (eq :utf-8 (normalize-encoding :utf8)))
+  (ok (eq :iso-8859-1 (normalize-encoding :latin-1)))
+  (ok (eq :ascii (normalize-encoding :us-ascii)))
   (ok (eq :base64 (normalize-encoding "b64")))
   (ok (eq :base64url (normalize-encoding :urlsafe)))
   (ok (eq :base16 (normalize-encoding :hex)))
   (ok (eq :base32hex (normalize-encoding "base32-hex"))))
+
+(deftest default-utf-8
+  (let ((octets (encode "hello")))
+    (ok (equalp #(104 101 108 108 111) octets))
+    (ok (string= "hello" (decode octets))))
+  (ok (string= "café" (decode (encode "café" :encoding :utf-8))))
+  (ok (equalp (encode "café" :encoding :iso-8859-1)
+              #(99 97 102 233)))
+  (ok (string= "café" (decode #(99 97 102 233) :encoding :iso-8859-1)))
+  (ok (signals (encode #(1 2 3)) 'encoding-encode-error)))

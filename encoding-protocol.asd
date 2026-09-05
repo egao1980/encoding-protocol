@@ -1,6 +1,6 @@
 (defsystem "encoding-protocol"
-  :version "0.1.2"
-  :description "Transfer encodings for cl-stack (RFC 4648, quoted-printable, RLE)"
+  :version "0.2.0"
+  :description "Text (UTF-8 default) + transfer encodings for cl-stack (RFC 4648, QP, RLE)"
   :author "egao1980"
   :license "MIT"
   :depends-on ("babel")

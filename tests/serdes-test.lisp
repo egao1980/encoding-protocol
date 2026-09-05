@@ -20,7 +20,7 @@
 
 (deftest encode-to-octets
   (let ((wire (encode-to-octets (utf8 "f") :encoding :base64)))
-    (ok (equalp (babel:string-to-octets "Zg==" :encoding :ascii) wire))
+    (ok (equalp (encode "Zg==" :encoding :ascii) wire))
     (ok (equalp (utf8 "f") (decode-octets wire :encoding :base64)))))
 
 (deftest serdes-rle-roundtrip

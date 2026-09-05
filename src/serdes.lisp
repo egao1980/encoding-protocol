@@ -82,7 +82,6 @@
                                    :media-type "quoted-printable")
   (serdes-protocol:register-format :rle
                                    (make-rfc4648-serdes-backend :encoding :rle)
-                                   :binary t)
-  (use-encoding-backend :encoding :base64))
+                                   :binary t))
 
 (%install-formats)
