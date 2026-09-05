@@ -1,9 +1,10 @@
 (defsystem "encoding-protocol"
-  :version "0.1.1"
-  :description "Transfer encodings for cl-stack (RFC 4648, quoted-printable, RLE); serdes :base64 / :base32 / :base16 / :rle / :quoted-printable"
+  :version "0.1.2"
+  :description "Transfer encodings for cl-stack (RFC 4648, quoted-printable, RLE)"
   :author "egao1980"
   :license "MIT"
-  :depends-on ("babel" "serdes-protocol")
+  :depends-on ("babel")
+  :properties (:cl-repo (:ci (:sources (("serdes-protocol" :oci)))))
   :serial t
   :pathname "src"
   :components ((:file "package")
@@ -11,12 +12,17 @@
                (:file "codec")
                (:file "rle")
                (:file "quoted-printable")
-               (:file "protocol")
-               (:file "serdes"))
+               (:file "protocol"))
   :in-order-to ((test-op (test-op "encoding-protocol/tests"))))
 
+(defsystem "encoding-protocol/serdes"
+  :depends-on ("encoding-protocol" "serdes-protocol")
+  :serial t
+  :pathname "src"
+  :components ((:file "serdes")))
+
 (defsystem "encoding-protocol/tests"
-  :depends-on ("encoding-protocol" "serdes-protocol" "rove")
+  :depends-on ("encoding-protocol" "encoding-protocol/serdes" "serdes-protocol" "rove")
   :pathname "tests"
   :serial t
   :components ((:file "package")
