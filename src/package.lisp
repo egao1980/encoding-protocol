@@ -27,6 +27,10 @@
            #:decode-octets
            #:rle-runs
            #:expand-rle-runs
+           #:percent-encode
+           #:percent-decode
+           #:percent-decode-octets
+           #:decode-utf-8-strict
 
            #:rfc4648-serdes-backend
            #:make-rfc4648-serdes-backend

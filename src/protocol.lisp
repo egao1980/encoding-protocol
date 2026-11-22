@@ -165,12 +165,16 @@
   (:documentation
    "Decode SOURCE.
     :text family (:utf-8 default): octets → string (string source is identity).
+    :UTF-8 with :STRICT T uses DECODE-UTF-8-STRICT (no overlong forms or surrogates).
     RFC 4648 / QP / RLE: text → octets."))
 
 (defmethod decode (source &key (encoding nil) (pad t pad-p) (strict nil strict-p))
   (let ((enc (%resolved-encoding encoding)))
     (if (eq (%encoding-family enc) :text)
-        (%decode-text source enc)
+        (if (and (eq enc :utf-8) (%effective-strict strict strict-p)
+                 (vectorp source) (not (stringp source)))
+            (decode-utf-8-strict source)
+            (%decode-text source enc))
         (%decode-transfer source enc pad pad-p strict strict-p))))
 
 (defun encode-to-octets (value &key encoding (pad t pad-p) columns)
