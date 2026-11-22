@@ -1,6 +1,6 @@
 (defsystem "encoding-protocol"
-  :version "0.2.0"
-  :description "Text (UTF-8 default) + transfer encodings for cl-stack (RFC 4648, QP, RLE)"
+  :version "0.3.0"
+  :description "Text (UTF-8 default) + transfer encodings for cl-stack (RFC 4648, QP, RLE, RFC 3986 percent)"
   :author "egao1980"
   :license "MIT"
   :depends-on ("babel")
@@ -11,6 +11,7 @@
                (:file "codec")
                (:file "rle")
                (:file "quoted-printable")
+               (:file "percent")
                (:file "protocol"))
   :in-order-to ((test-op (test-op "encoding-protocol/tests"))))
 
@@ -26,6 +27,7 @@
   :serial t
   :components ((:file "package")
                (:file "codec-test")
+               (:file "percent-test")
                (:file "serdes-test"))
   :perform (test-op (o c)
              (unless (symbol-call :rove :run c)

@@ -33,6 +33,21 @@ Load `encoding-protocol/serdes` to register [`serdes-protocol`](https://github.c
 
 `:pad t` (default) is RFC-canonical. Decode ignores `SP` / `HT` / `CR` / `LF` unless `:strict t`. Invalid alphabet characters signal `encoding-decode-error` with `continue` (skip) and `use-value` (alphabet index).
 
+## Percent-encoding and strict UTF-8
+
+RFC 3986 §2.1 over UTF-8 octets. The unreserved set is ASCII `A-Z a-z 0-9 - . _ ~`; every other octet becomes upper-case `%XX`.
+
+```lisp
+(percent-encode "ж/a b" :safe "/")   ; "%D0%B6/a%20b" (SigV4 path style)
+(percent-decode "%C3%A9")             ; "é"
+(percent-decode "%C0%AF")             ; encoding-decode-error: overlong "/"
+(percent-decode-octets "%FF")         ; #(255), no text decode
+(decode-utf-8-strict octets)          ; RFC 3629: no overlong forms, surrogates or > U+10FFFF
+(decode octets :strict t)             ; same, through the GF
+```
+
+A malformed escape, a non-ASCII input character or invalid UTF-8 signals `encoding-decode-error`.
+
 ## License
 
 MIT
