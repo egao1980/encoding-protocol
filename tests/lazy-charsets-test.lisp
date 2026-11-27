@@ -41,21 +41,23 @@
 (defun source-registry ()
   "A source registry of exactly the directories this image loaded
    encoding-protocol/cjk and its dependencies from: the child must not find
-   other copies through the user's inherited configuration."
+   other copies through the user's inherited configuration. Directories are
+   pathnames, which keep their Windows drive (DIRECTORY-NAMESTRING drops it)."
   `(:source-registry
-    ,@(mapcar (lambda (file) (list :directory (directory-namestring file)))
-              (remove-duplicates (asd-files "encoding-protocol/cjk")
-                                 :test #'string= :key #'directory-namestring
-                                 :from-end t))
+    ,@(mapcar (lambda (directory) (list :directory directory))
+              (remove-duplicates (mapcar (lambda (file)
+                                           (uiop:pathname-directory-pathname (pathname file)))
+                                         (asd-files "encoding-protocol/cjk"))
+                                 :test #'uiop:pathname-equal :from-end t))
     :ignore-inherited-configuration))
 
 (defun child-program (form)
   "The program a fresh image loads: set up ASDF, load encoding-protocol, then
    evaluate FORM and print its result after *RESULT-MARKER*. ASCII only, so the
-   child reads it the same way whatever its default external format."
+   child reads it the same way whatever its default external format. Errors
+   reach stderr, which the parent reports."
   (format nil "(require \"asdf\")
-(let ((*standard-output* (make-broadcast-stream))
-      (*error-output* (make-broadcast-stream)))
+(let ((*standard-output* (make-broadcast-stream)))
   (asdf:initialize-source-registry '~A)
   (asdf:load-system \"encoding-protocol\"))
 (in-package \"ENCODING-PROTOCOL\")
@@ -69,30 +71,6 @@
           (with-standard-io-syntax (prin1-to-string (source-registry)))
           form *result-marker*))
 
-(deftest zz-windows-diagnostic
-  ;; Temporary: which way of starting the child works on Windows CI.
-  #+sbcl
-  (let* ((runtime (uiop:native-namestring sb-ext:*runtime-pathname*))
-         (core (uiop:native-namestring sb-ext:*core-pathname*))
-         (true-core (uiop:native-namestring (truename sb-ext:*core-pathname*)))
-         (heap (format nil "~DMB" (floor (sb-ext:dynamic-space-size) (* 1024 1024))))
-         (variants
-           (list (list runtime "--version")
-                 (list runtime "--core" core "--version")
-                 (list runtime "--core" true-core "--version")
-                 (list runtime "--core" true-core "--noinform" "--non-interactive"
-                       "--eval" "(sb-ext:exit :code 3)")
-                 (list runtime "--core" true-core "--noinform" "--dynamic-space-size" heap
-                       "--non-interactive" "--no-sysinit" "--no-userinit"
-                       "--eval" "(sb-ext:exit :code 3)"))))
-    (dolist (v variants)
-      (multiple-value-bind (out err code)
-          (uiop:run-program v :output :string :error-output :string :ignore-error-status t)
-        (format t "~&DIAG ~S => ~S ~S ~S~%" v code
-                (subseq out 0 (min 300 (length out)))
-                (subseq err 0 (min 300 (length err)))))))
-  (ok t))
-
 (defun run-in-fresh-image (form)
   "Evaluate FORM (a string, read in ENCODING-PROTOCOL) in a fresh SBCL; its
    printed result, or (:CHILD-FAILED exit-code stdout stderr) when it did not
@@ -102,16 +80,18 @@
   (let ((file (uiop:tmpize-pathname
                (merge-pathnames "encoding-protocol-child.lisp" (uiop:temporary-directory)))))
     (unwind-protect
-        (let ((command (list (uiop:native-namestring sb-ext:*runtime-pathname*)
-                             "--core" (uiop:native-namestring sb-ext:*core-pathname*)
-                             "--noinform" "--non-interactive" "--no-sysinit" "--no-userinit"
-                             "--load" (uiop:native-namestring file))))
+        (progn
           (with-open-file (out file :direction :output :if-exists :supersede
                                     :external-format :utf-8)
             (write-string (child-program form) out))
           (multiple-value-bind (code stdout stderr)
               (process-protocol:run
-               command
+               (list (uiop:native-namestring sb-ext:*runtime-pathname*)
+                     ;; TRUENAME: on Windows CI *CORE-PATHNAME* holds doubled
+                     ;; backslashes.
+                     "--core" (uiop:native-namestring (truename sb-ext:*core-pathname*))
+                     "--noinform" "--non-interactive" "--no-sysinit" "--no-userinit"
+                     "--load" (uiop:native-namestring file))
                :backend (process-backend-uiop:make-uiop-process-backend)
                :output :string :error-output :string :timeout 600)
             (let ((start (search *result-marker* stdout)))
@@ -121,13 +101,7 @@
                         (let ((*read-eval* nil))
                           (read-from-string stdout t nil
                                             :start (+ start (length *result-marker*)))))
-                    ;; Diagnostic (temporary): the same argv through UIOP directly.
-                    (multiple-value-bind (uiop-out uiop-err uiop-code)
-                        (uiop:run-program command :output :string :error-output :string
-                                                  :ignore-error-status t)
-                      (list :child-failed code (tail stdout) (tail stderr)
-                            :command command
-                            :uiop uiop-code (tail uiop-out) (tail uiop-err))))))))
+                    (list :child-failed code (tail stdout) (tail stderr)))))))
       (when (probe-file file)
         (delete-file file))))
   #-sbcl
