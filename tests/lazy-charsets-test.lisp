@@ -78,16 +78,16 @@
   (let ((file (uiop:tmpize-pathname
                (merge-pathnames "encoding-protocol-child.lisp" (uiop:temporary-directory)))))
     (unwind-protect
-        (progn
+        (let ((command (list (uiop:native-namestring sb-ext:*runtime-pathname*)
+                             "--core" (uiop:native-namestring sb-ext:*core-pathname*)
+                             "--noinform" "--non-interactive" "--no-sysinit" "--no-userinit"
+                             "--load" (uiop:native-namestring file))))
           (with-open-file (out file :direction :output :if-exists :supersede
                                     :external-format :utf-8)
             (write-string (child-program form) out))
           (multiple-value-bind (code stdout stderr)
               (process-protocol:run
-               (list (namestring sb-ext:*runtime-pathname*)
-                     "--core" (namestring sb-ext:*core-pathname*)
-                     "--noinform" "--non-interactive" "--no-sysinit" "--no-userinit"
-                     "--load" (namestring file))
+               command
                :backend (process-backend-uiop:make-uiop-process-backend)
                :output :string :error-output :string :timeout 600)
             (let ((start (search *result-marker* stdout)))
@@ -97,7 +97,13 @@
                         (let ((*read-eval* nil))
                           (read-from-string stdout t nil
                                             :start (+ start (length *result-marker*)))))
-                    (list :child-failed code (tail stdout) (tail stderr)))))))
+                    ;; Diagnostic (temporary): the same argv through UIOP directly.
+                    (multiple-value-bind (uiop-out uiop-err uiop-code)
+                        (uiop:run-program command :output :string :error-output :string
+                                                  :ignore-error-status t)
+                      (list :child-failed code (tail stdout) (tail stderr)
+                            :command command
+                            :uiop uiop-code (tail uiop-out) (tail uiop-err))))))))
       (when (probe-file file)
         (delete-file file))))
   #-sbcl
