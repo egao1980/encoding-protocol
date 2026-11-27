@@ -63,10 +63,37 @@ A malformed escape, a non-ASCII input character or invalid UTF-8 signals `encodi
 | `:eucjp` | `euc-jp` `x-euc-jp` `ujis` `cseucpkdfmtjapanese` |
 | `:gbk` | `gb2312` `csgb2312` `euc-cn` `x-euc-cn` `chinese` `gbk` `cp936` `ms936` `windows-936` |
 | `:ebcdic-us` / `:ebcdic-international` | `ibm-037` |
+| `:cp1250` `:cp1253` … `:cp1258` | `windows-125N` `cp125N` `x-cp125N` |
+| `:cp866` | `cp866` `ibm866` `csibm866` |
+| `:mac-roman` | `macintosh` `mac-roman` `macroman` `csmacintosh` |
+| `:tis-620` / `:cp874` | `tis-620` `tis620` `iso-ir-166` / `windows-874` `ms874` |
 
 `shift_jis` decodes and encodes as Windows-31J (CP932), the variant mail clients send. `gb2312` uses GBK, a superset: GB2312 text gives the same octets. Babel's EUC-JP has no JIS X 0212, so `é` does not encode (Python gives three octets).
 
-Not supported: `big5`, `iso-2022-jp`, `euc-kr`, `gb18030`, `hz`, `utf-7`, `windows-125x` other than 1251/1252, and anything else Babel lacks.
+The multibyte charsets below live in the secondary system `encoding-protocol/cjk` (about 240 KB of fasl, mostly tables), so load it when you need them:
+
+```lisp
+(asdf:load-system "encoding-protocol/cjk")
+```
+
+| Babel encoding | Names |
+|----------------|-------|
+| `:iso-2022-jp` | `iso-2022-jp` `csiso2022jp` |
+| `:big5` | `big5` `big5-tw` `csbig5` `cn-big5` `x-x-big5` |
+| `:euc-kr` | `euc-kr` `euckr` `cseuckr` |
+| `:cp949` | `ks_c_5601-1987` `ks_c_5601` `uhc` `windows-949` `korean` `ms949` `csksc56011987` |
+| `:gb18030` | `gb18030` `gb18030-2000` |
+
+Without it, `normalize-encoding` still names the charset and returns the system as a second value (`"big5"` → `:big5`, `"encoding-protocol/cjk"`), and `encode` / `decode` signal `encoding-unknown-encoding` with that system in `encoding-unknown-encoding-system` and the message.
+
+These charsets are Babel encodings registered by this library, so `babel:string-to-octets` / `octets-to-string` accept them too. Each one matches the Python codec of the same name, octet for octet: the tables are generated from Python's codecs by `tools/gen-charsets.py` (`uv run --no-project tools/gen-charsets.py`), which checks its model of each decoder and encoder against Python over every single octet, every two-octet sequence and every code point before it writes anything. Details:
+
+- `iso-2022-jp` is stateful: ASCII, JIS X 0201 Roman (`¥`, `‾`) and JIS X 0208, switched with `ESC ( B`, `ESC ( J` and `ESC $ B`. Encoding switches mode only when it has to and always ends in ASCII. Decoding also takes `ESC $ @`, `ESC $ ( B` and `ESC & @ ESC $ B`, and passes control characters through in every mode, as Python does. Half-width katakana does not encode (Python's `iso2022_jp` refuses it too).
+- `euc-kr` is KS X 1001 and encodes the other Hangul syllables as KS X 1001:1998 eight-octet make-up sequences, like Python's `euc_kr`. Mail labelled `ks_c_5601-1987` is really CP949 (Outlook), so those names map to `:cp949`.
+- `gb18030` covers all of Unicode: two-octet GBK forms, four-octet BMP ranges and four-octet supplementary planes.
+- `cp1258` maps the Windows table only; it does not compose or decompose Vietnamese tone marks.
+
+Not supported: `big5-hkscs`, `hz`, `utf-7`, `iso-2022-jp-2`, `iso-2022-kr`, and anything else Babel lacks.
 
 Conditions (all `encoding-error`):
 
@@ -75,7 +102,7 @@ Conditions (all `encoding-error`):
   ```lisp
   (handler-bind ((encoding-unknown-encoding
                    (lambda (c) (use-value :iso-8859-1 c))))
-    (decode octets :encoding "big5"))
+    (decode octets :encoding "utf-7"))
   ```
 
 - `encoding-transcode-error` — a character the charset cannot encode (`cannot encode '€' (U+20AC) at index 2`), or malformed input octets.
