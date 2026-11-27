@@ -70,21 +70,52 @@ A malformed escape, a non-ASCII input character or invalid UTF-8 signals `encodi
 
 `shift_jis` decodes and encodes as Windows-31J (CP932), the variant mail clients send. `gb2312` uses GBK, a superset: GB2312 text gives the same octets. Babel's EUC-JP has no JIS X 0212, so `é` does not encode (Python gives three octets).
 
-The multibyte charsets below live in the secondary system `encoding-protocol/cjk` (about 240 KB of fasl, mostly tables), so load it when you need them:
+The multibyte charsets below are optional: each lives in its own secondary system, loaded on first use.
+
+| Babel encoding | Names | System | Fasl (SBCL) |
+|----------------|-------|--------|-------------|
+| `:iso-2022-jp` | `iso-2022-jp` `csiso2022jp` | `encoding-protocol/iso-2022-jp` | 40 KB |
+| `:big5` | `big5` `big5-tw` `csbig5` `cn-big5` `x-x-big5` | `encoding-protocol/big5` | 48 KB |
+| `:euc-kr` | `euc-kr` `euckr` `cseuckr` | `encoding-protocol/euc-kr` | 95 KB (with cp949) |
+| `:cp949` | `ks_c_5601-1987` `ks_c_5601` `uhc` `windows-949` `korean` `ms949` `csksc56011987` | `encoding-protocol/euc-kr` | |
+| `:gb18030` | `gb18030` `gb18030-2000` | `encoding-protocol/gb18030` | 73 KB |
+
+`encoding-protocol/cjk` depends on all four, for code that wants every charset up front.
+
+### Loading on demand
+
+`encode`, `decode` and `normalize-encoding` load a charset's system the first time they meet one of its names: the first big5 message loads `encoding-protocol/big5` and nothing else. No dependency on the charset systems is needed.
 
 ```lisp
-(asdf:load-system "encoding-protocol/cjk")
+(asdf:load-system "encoding-protocol")
+(encode "中文" :encoding "big5")    ; loads encoding-protocol/big5, then encodes
 ```
 
-| Babel encoding | Names |
-|----------------|-------|
-| `:iso-2022-jp` | `iso-2022-jp` `csiso2022jp` |
-| `:big5` | `big5` `big5-tw` `csbig5` `cn-big5` `x-x-big5` |
-| `:euc-kr` | `euc-kr` `euckr` `cseuckr` |
-| `:cp949` | `ks_c_5601-1987` `ks_c_5601` `uhc` `windows-949` `korean` `ms949` `csksc56011987` |
-| `:gb18030` | `gb18030` `gb18030-2000` |
+- Each system loads once per image, under a global lock: threads that meet big5 at the same time wait for the one load, and then all succeed. The load runs before any Babel call and writes nothing to `*standard-output*`. Babel's tables are updated all at once when the load succeeds, so other threads never see a half-registered charset, and a failed load leaves them as they were.
+- `*auto-load-charsets*` (default `t`) controls it. Bound to `nil`, nothing loads: `normalize-encoding` returns the system as a second value (`"big5"` → `:big5`, `"encoding-protocol/big5"`), and `encode` / `decode` signal `encoding-unknown-encoding` with that system in `encoding-unknown-encoding-system`.
+- The `load-charset-system` restart loads the system and retries, whatever `*auto-load-charsets*` says. The function of the same name invokes it, so it works as a handler:
 
-Without it, `normalize-encoding` still names the charset and returns the system as a second value (`"big5"` → `:big5`, `"encoding-protocol/cjk"`), and `encode` / `decode` signal `encoding-unknown-encoding` with that system in `encoding-unknown-encoding-system` and the message.
+  ```lisp
+  (let ((*auto-load-charsets* nil))
+    (handler-bind ((encoding-unknown-encoding #'load-charset-system))
+      (decode octets :encoding "big5")))
+  ```
+
+- When the load fails (no ASDF in the image, the system not found, a compile error), the caller gets `encoding-unknown-encoding` with the system and the failure in `encoding-unknown-encoding-load-error`, never a raw ASDF error. `normalize-encoding` also offers `continue`: return the name and the system, unloaded.
+
+### Delivered images
+
+An image saved with `save-lisp-and-die` may have no ASDF, or no sources, at run time. Load the charsets it needs before saving:
+
+```lisp
+(load-charsets "big5" "ks_c_5601-1987")   ; → ("encoding-protocol/big5" "encoding-protocol/euc-kr")
+(load-charsets :all)                       ; every optional charset
+(sb-ext:save-lisp-and-die "app" :executable t)
+```
+
+`load-charsets` takes any names `normalize-encoding` takes and returns the systems that define them. A charset of the core system needs nothing; an unknown name signals `encoding-unknown-encoding`. In the saved image those charsets are plain Babel encodings, and a charset that was not loaded signals `encoding-unknown-encoding` with the load error. Depending on `encoding-protocol/cjk` (or one charset system) in the application's `.asd` does the same at build time.
+
+### Charset details
 
 These charsets are Babel encodings registered by this library, so `babel:string-to-octets` / `octets-to-string` accept them too. Each one matches the Python codec of the same name, octet for octet: the tables are generated from Python's codecs by `tools/gen-charsets.py` (`uv run --no-project tools/gen-charsets.py`), which checks its model of each decoder and encoder against Python over every single octet, every two-octet sequence and every code point before it writes anything. Details:
 
@@ -95,9 +126,11 @@ These charsets are Babel encodings registered by this library, so `babel:string-
 
 Not supported: `big5-hkscs`, `hz`, `utf-7`, `iso-2022-jp-2`, `iso-2022-kr`, and anything else Babel lacks.
 
-Conditions (all `encoding-error`):
+### Conditions
 
-- `encoding-unknown-encoding` — no such charset; `encoding-unknown-encoding-encoding` is the normalized name. A `use-value` restart takes another encoding:
+All are `encoding-error`s:
+
+- `encoding-unknown-encoding` — no such charset, or its system is not loaded; `encoding-unknown-encoding-encoding` is the normalized name, `encoding-unknown-encoding-system` the system that defines it, `encoding-unknown-encoding-load-error` the condition from a failed load. A `use-value` restart takes another encoding, and `load-charset-system` loads the system and retries:
 
   ```lisp
   (handler-bind ((encoding-unknown-encoding
