@@ -19,27 +19,101 @@
                  :pad pad
                  :strict strict))
 
+(defun %encoding-key (name)
+  "Lookup key for an encoding NAME: upcased, letters and digits only
+   (\"Shift_JIS\" and \"shift-jis\" → \"SHIFTJIS\")."
+  (string-upcase (remove-if-not #'alphanumericp (string name))))
+
+(defparameter *encoding-aliases*
+  (let ((table (make-hash-table :test 'equal)))
+    (loop for (target . names)
+            in '(;; Transfer encodings
+                 (:base64 "base64" "b64")
+                 (:base64url "base64url" "urlsafe" "base64urlsafe")
+                 (:base32 "base32" "b32")
+                 (:base32hex "base32hex" "b32hex")
+                 (:base16 "base16" "hex" "hexadecimal")
+                 (:quoted-printable "quoted-printable" "qp")
+                 (:rle "rle" "run-length")
+                 ;; IANA charset names and common aliases (Python codecs) → Babel.
+                 (:utf-8 "utf-8" "utf8" "u8" "cp65001")
+                 (:ascii "us-ascii" "ascii" "ansi_x3.4-1968" "iso646-us" "us"
+                         "cp367" "ibm367" "csascii")
+                 (:iso-8859-1 "latin-1" "latin1" "l1" "cp819" "ibm819" "csisolatin1")
+                 (:iso-8859-2 "latin2" "l2" "csisolatin2")
+                 (:iso-8859-3 "latin3" "l3" "csisolatin3")
+                 (:iso-8859-4 "latin4" "l4" "csisolatin4")
+                 (:iso-8859-5 "cyrillic" "csisolatincyrillic")
+                 (:iso-8859-6 "arabic" "csisolatinarabic")
+                 (:iso-8859-7 "greek" "greek8" "csisolatingreek")
+                 (:iso-8859-8 "hebrew" "csisolatinhebrew")
+                 (:iso-8859-9 "latin5" "l5" "csisolatin5")
+                 (:iso-8859-10 "latin6" "l6" "csisolatin6")
+                 (:iso-8859-11 "thai")
+                 (:iso-8859-13 "latin7" "l7")
+                 (:iso-8859-14 "latin8" "l8")
+                 (:iso-8859-15 "latin9" "l9")
+                 (:iso-8859-16 "latin10" "l10")
+                 (:cp1251 "windows-1251" "cp1251")
+                 (:cp1252 "windows-1252" "cp1252")
+                 (:koi8-r "koi8-r" "cskoi8r")
+                 (:koi8-u "koi8-u")
+                 (:koi8-ru "koi8-ru")
+                 ;; Babel's CP932 is the Shift_JIS mail clients send (Windows-31J).
+                 (:cp932 "shift_jis" "shift-jis" "sjis" "x-sjis" "ms_kanji"
+                         "csshiftjis" "windows-31j" "cswindows31j" "cp932" "ms932" "mskanji")
+                 (:eucjp "euc-jp" "eucjp" "x-euc-jp" "ujis" "u-jis"
+                         "cseucpkdfmtjapanese")
+                 ;; GBK is a superset of GB2312 (EUC-CN): same octets for GB2312 text.
+                 (:gbk "gb2312" "csgb2312" "gb2312-80" "euc-cn" "euccn" "x-euc-cn"
+                       "chinese" "gbk" "x-gbk" "cp936" "ms936" "windows-936"))
+          do (dolist (name names)
+               (setf (gethash (%encoding-key name) table) target)))
+    table)
+  "Encoding-key → canonical keyword (transfer encodings and charset aliases).")
+
+(defvar *babel-encoding-names* nil
+  "(count . table): Babel names and aliases by encoding key, rebuilt when the
+   number of Babel encodings changes.")
+
+(defun %babel-encoding-names ()
+  (let ((names (babel-encodings:list-character-encodings)))
+    (if (eql (car *babel-encoding-names*) (length names))
+        (cdr *babel-encoding-names*)
+        (let ((table (make-hash-table :test 'equal)))
+          (dolist (name names)
+            (dolist (alias (cons name (babel-encodings:enc-aliases
+                                       (babel-encodings:get-character-encoding name))))
+              (setf (gethash (%encoding-key alias) table) name)))
+          (setf *babel-encoding-names* (cons (length names) table))
+          table))))
+
+(defun %babel-encoding-p (encoding)
+  "True when ENCODING is a Babel encoding name or alias keyword."
+  (and (keywordp encoding)
+       (let ((name (gethash (%encoding-key encoding) (%babel-encoding-names))))
+         (and name
+              (or (eq name encoding)
+                  (member encoding (babel-encodings:enc-aliases
+                                    (babel-encodings:get-character-encoding name))))
+              t))))
+
 (defun normalize-encoding (encoding)
-  (flet ((from-keyword (kw)
-           (case kw
-             ((:utf-8 :utf8) :utf-8)
-             ((:ascii :us-ascii) :ascii)
-             ((:iso-8859-1 :latin-1 :latin1) :iso-8859-1)
-             ((:base64 :b64) :base64)
-             ((:base64url :base64-url :urlsafe :base64-urlsafe) :base64url)
-             ((:base32 :b32) :base32)
-             ((:base32hex :base32-hex :b32hex) :base32hex)
-             ((:base16 :hex :hexadecimal) :base16)
-             ((:quoted-printable :qp) :quoted-printable)
-             ((:rle :run-length) :rle)
-             (otherwise kw))))
+  "Canonical keyword for ENCODING (string, symbol or NIL).
+   Names match case-insensitively and ignore punctuation, so \"Shift_JIS\",
+   \"shift-jis\" and :SJIS are one name. Charset aliases resolve to the Babel
+   encoding (\"shift_jis\" → :CP932, \"gb2312\" → :GBK). An unknown name comes
+   back as a keyword; ENCODE / DECODE signal ENCODING-UNKNOWN-ENCODING for it."
+  (flet ((resolve (name)
+           (let ((key (%encoding-key name)))
+             (or (gethash key *encoding-aliases*)
+                 (and (string/= key "") (gethash key (%babel-encoding-names)))
+                 (intern (string-upcase (string-trim '(#\Space #\Tab) name))
+                         :keyword)))))
     (etypecase encoding
       (null :utf-8)
-      (keyword (from-keyword encoding))
-      (string
-       (from-keyword (intern (string-upcase (string-trim '(#\Space #\Tab) encoding))
-                             :keyword)))
-      (symbol (from-keyword (intern (symbol-name encoding) :keyword))))))
+      (string (resolve encoding))
+      (symbol (resolve (symbol-name encoding))))))
 
 (defun %resolved-encoding (encoding)
   (normalize-encoding
@@ -67,21 +141,65 @@
     (*encoding-backend* (encoding-backend-strict *encoding-backend*))
     (t nil)))
 
+(defun %text-encoding (encoding)
+  "ENCODING when Babel knows it, else signal ENCODING-UNKNOWN-ENCODING.
+   USE-VALUE supplies another encoding name (normalized and checked again)."
+  (loop
+    (when (%babel-encoding-p encoding)
+      (return encoding))
+    (restart-case
+        (error 'encoding-unknown-encoding
+               :encoding encoding
+               :message "no Babel character encoding by that name")
+      (use-value (value)
+        :report "Use another encoding"
+        :interactive (lambda ()
+                       (format *query-io* "Encoding: ")
+                       (force-output *query-io*)
+                       (list (read *query-io*)))
+        (setf encoding (normalize-encoding value))))))
+
+(defun %unencodable-index (string encoding)
+  "Index of the first character of STRING that ENCODING cannot encode, or NIL."
+  (loop for i from 0
+        for ch across string
+        unless (handler-case
+                   (progn (babel:string-to-octets (string ch) :encoding encoding) t)
+                 ;; Not only CHARACTER-CODING-ERROR: Babel 0.5.0 signals
+                 ;; (ERROR T …) for KOI8 and TYPE-ERROR for CP932 / EUC-JP (#9).
+                 (error () nil))
+          return i))
+
 (defun %babel-string-to-octets (string encoding)
+  ;; Babel's own error for an unmappable character is unreliable: KOI8
+  ;; encoders signal (ERROR T …), CP932 / EUC-JP a TYPE-ERROR on NIL.
+  ;; Locate the character ourselves and report it.
   (handler-case
       (babel:string-to-octets string :encoding encoding)
     (error (e)
-      (error 'encoding-transcode-error
-             :encoding encoding
-             :message (princ-to-string e)))))
+      (let ((index (%unencodable-index string encoding)))
+        (error 'encoding-transcode-error
+               :encoding encoding
+               :message (if index
+                            (let ((ch (char string index)))
+                              (format nil "cannot encode '~C' (U+~4,'0X) at index ~D"
+                                      ch (char-code ch) index))
+                            (princ-to-string e)))))))
 
 (defun %babel-octets-to-string (octets encoding)
   (handler-case
       (babel:octets-to-string octets :encoding encoding)
-    (error (e)
+    (babel-encodings:character-coding-error (e)
       (error 'encoding-transcode-error
              :encoding encoding
-             :message (princ-to-string e)))))
+             :message (princ-to-string e)))
+    (error ()
+      ;; Babel's multibyte decoders fail on truncated or unmapped input with
+      ;; TYPE-ERROR / index errors rather than a coding error.
+      (error 'encoding-transcode-error
+             :encoding encoding
+             :message (format nil "malformed ~A input (~D octets)"
+                              encoding (length octets))))))
 
 (defun %emit (out stream)
   (cond
@@ -90,11 +208,12 @@
     (t (write-sequence out stream) out)))
 
 (defun %encode-text (value encoding stream)
-  (unless (stringp value)
-    (error 'encoding-encode-error
-           :message (format nil "encode ~S wants a string, got ~S"
-                            encoding (type-of value))))
-  (%emit (%babel-string-to-octets value encoding) stream))
+  (let ((encoding (%text-encoding encoding)))
+    (unless (stringp value)
+      (error 'encoding-encode-error
+             :message (format nil "encode ~S wants a string, got ~S"
+                              encoding (type-of value))))
+    (%emit (%babel-string-to-octets value encoding) stream)))
 
 (defun %encode-transfer (value encoding pad pad-p columns columns-p stream)
   (let* ((octets (%as-octets value))
@@ -133,20 +252,21 @@
         (%encode-transfer value enc pad pad-p columns columns-p stream))))
 
 (defun %decode-text (source encoding)
-  (etypecase source
-    (string source)
-    ((vector (unsigned-byte 8))
-     (%babel-octets-to-string source encoding))
-    (vector
-     (%babel-octets-to-string (%as-octets source) encoding))
-    (stream
-     (%babel-octets-to-string
-      (let ((out (make-array 0 :element-type '(unsigned-byte 8)
-                             :adjustable t :fill-pointer 0)))
-        (loop for b = (read-byte source nil nil)
-              while b do (vector-push-extend b out))
-        out)
-      encoding))))
+  (let ((encoding (%text-encoding encoding)))
+    (etypecase source
+      (string source)
+      ((vector (unsigned-byte 8))
+       (%babel-octets-to-string source encoding))
+      (vector
+       (%babel-octets-to-string (%as-octets source) encoding))
+      (stream
+       (%babel-octets-to-string
+        (let ((out (make-array 0 :element-type '(unsigned-byte 8)
+                                 :adjustable t :fill-pointer 0)))
+          (loop for b = (read-byte source nil nil)
+                while b do (vector-push-extend b out))
+          out)
+        encoding)))))
 
 (defun %decode-transfer (source encoding pad pad-p strict strict-p)
   (ecase (%encoding-family encoding)

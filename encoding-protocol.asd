@@ -1,5 +1,5 @@
 (defsystem "encoding-protocol"
-  :version "0.3.0"
+  :version "0.3.1"
   :description "Text (UTF-8 default) + transfer encodings for cl-stack (RFC 4648, QP, RLE, RFC 3986 percent)"
   :author "egao1980"
   :license "MIT"
@@ -28,6 +28,7 @@
   :components ((:file "package")
                (:file "codec-test")
                (:file "percent-test")
+               (:file "charset-test")
                (:file "serdes-test"))
   :perform (test-op (o c)
              (unless (symbol-call :rove :run c)
