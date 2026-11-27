@@ -49,46 +49,59 @@
                                  :from-end t))
     :ignore-inherited-configuration))
 
-(defun fresh-image-command (form)
-  #+sbcl
-  (flet ((readable (x)
-           (with-standard-io-syntax (prin1-to-string x))))
-    (list (namestring sb-ext:*runtime-pathname*)
-          "--core" (namestring sb-ext:*core-pathname*)
-          "--noinform" "--non-interactive" "--no-sysinit" "--no-userinit"
-          "--eval" "(require \"asdf\")"
-          "--eval"
-          (format nil "(let ((*standard-output* (make-broadcast-stream))
-                             (*error-output* (make-broadcast-stream)))
-                         (asdf:initialize-source-registry '~A)
-                         (asdf:load-system \"encoding-protocol\"))"
-                  (readable (source-registry)))
-          "--eval" "(in-package \"ENCODING-PROTOCOL\")"
-          ;; Loud defaults: an on-demand load must still keep stdout clean.
-          "--eval" "(setf *load-verbose* t *load-print* t *compile-verbose* t *compile-print* t)"
-          "--eval"
-          (format nil "(let ((result ~A))
-                         (with-standard-io-syntax
-                           (let ((*package* (find-package \"KEYWORD\")))
-                             (format t \"~~&~A~~S~~%\" result))))"
-                  form *result-marker*)))
-  #-sbcl
-  (declare (ignore form)))
+(defun child-program (form)
+  "The program a fresh image loads: set up ASDF, load encoding-protocol, then
+   evaluate FORM and print its result after *RESULT-MARKER*. ASCII only, so the
+   child reads it the same way whatever its default external format."
+  (format nil "(require \"asdf\")
+(let ((*standard-output* (make-broadcast-stream))
+      (*error-output* (make-broadcast-stream)))
+  (asdf:initialize-source-registry '~A)
+  (asdf:load-system \"encoding-protocol\"))
+(in-package \"ENCODING-PROTOCOL\")
+;; Loud defaults: an on-demand load must still keep stdout clean.
+(setf *load-verbose* t *load-print* t *compile-verbose* t *compile-print* t)
+(let ((result ~A))
+  (with-standard-io-syntax
+    (let ((*package* (find-package \"KEYWORD\")))
+      (format t \"~~&~A~~S~~%\" result))))
+"
+          (with-standard-io-syntax (prin1-to-string (source-registry)))
+          form *result-marker*))
 
 (defun run-in-fresh-image (form)
-  "Evaluate FORM (a string, read in ENCODING-PROTOCOL) in a fresh image; its
-   printed result, or (:CHILD-FAILED exit-code stderr) when it did not finish."
-  (multiple-value-bind (code stdout stderr)
-      (process-protocol:run (fresh-image-command form)
-                            :backend (process-backend-uiop:make-uiop-process-backend)
-                            :output :string :error-output :string :timeout 600)
-    (let ((start (search *result-marker* stdout)))
-      (if (and (eql code 0) start)
-          (with-standard-io-syntax
-            (let ((*read-eval* nil))
-              (read-from-string stdout t nil :start (+ start (length *result-marker*)))))
-          (list :child-failed code
-                (subseq stderr (max 0 (- (length stderr) 2000))))))))
+  "Evaluate FORM (a string, read in ENCODING-PROTOCOL) in a fresh SBCL; its
+   printed result, or (:CHILD-FAILED exit-code stdout stderr) when it did not
+   finish. The program goes through a file: Windows command lines mangle
+   quotes and newlines in --eval arguments."
+  #+sbcl
+  (let ((file (uiop:tmpize-pathname
+               (merge-pathnames "encoding-protocol-child.lisp" (uiop:temporary-directory)))))
+    (unwind-protect
+        (progn
+          (with-open-file (out file :direction :output :if-exists :supersede
+                                    :external-format :utf-8)
+            (write-string (child-program form) out))
+          (multiple-value-bind (code stdout stderr)
+              (process-protocol:run
+               (list (namestring sb-ext:*runtime-pathname*)
+                     "--core" (namestring sb-ext:*core-pathname*)
+                     "--noinform" "--non-interactive" "--no-sysinit" "--no-userinit"
+                     "--load" (namestring file))
+               :backend (process-backend-uiop:make-uiop-process-backend)
+               :output :string :error-output :string :timeout 600)
+            (let ((start (search *result-marker* stdout)))
+              (flet ((tail (string) (subseq string (max 0 (- (length string) 2000)))))
+                (if (and (eql code 0) start)
+                    (with-standard-io-syntax
+                        (let ((*read-eval* nil))
+                          (read-from-string stdout t nil
+                                            :start (+ start (length *result-marker*)))))
+                    (list :child-failed code (tail stdout) (tail stderr)))))))
+      (when (probe-file file)
+        (delete-file file))))
+  #-sbcl
+  (declare (ignore form)))
 
 (deftest-parametrize fresh-image-charsets
     ((form expected)
@@ -105,15 +118,15 @@
      ;; quietly.
      ("(let* ((out (make-string-output-stream))
               (octets (let ((*standard-output* out))
-                        (encode \"中文\" :encoding \"big5\"))))
+                        (encode (map 'string #'code-char '(20013 25991)) :encoding \"big5\"))))
          (list (coerce octets 'list)
-               (decode octets :encoding :big5)
+               (map 'list #'char-code (decode octets :encoding :big5))
                (mapcar #'asdf:component-loaded-p
                        '(\"encoding-protocol/big5\" \"encoding-protocol/euc-kr\"
                          \"encoding-protocol/gb18030\" \"encoding-protocol/iso-2022-jp\"))
                *charset-systems-loaded*
                (get-output-stream-string out)))"
-      (quote ((164 164 164 229) "中文" (t nil nil nil) ("encoding-protocol/big5") "")))
+      (quote ((164 164 164 229) (20013 25991) (t nil nil nil) ("encoding-protocol/big5") "")))
      ;; NORMALIZE-ENCODING loads too; cp949 lives in encoding-protocol/euc-kr.
      ("(list (multiple-value-list (normalize-encoding \"ks_c_5601-1987\"))
              (mapcar #'asdf:component-loaded-p
@@ -128,7 +141,7 @@
       (quote ("encoding-protocol/big5" (:big5 "encoding-protocol/big5") nil)))
      ("(let ((*auto-load-charsets* nil))
          (list (coerce (handler-bind ((encoding-unknown-encoding #'load-charset-system))
-                         (encode \"中\" :encoding :big5))
+                         (encode (string (code-char 20013)) :encoding :big5))
                        'list)
                (asdf:component-loaded-p \"encoding-protocol/big5\")))"
       (quote ((164 164) t)))
@@ -151,11 +164,12 @@
       (quote ("encoding-protocol/big5" t)))
      ;; Four threads ask for big5 at once: one load, four results.
      ("(let* ((start nil)
+              (text (map 'string #'code-char '(20013 25991)))
               (threads (loop repeat 4
                              collect (bt2:make-thread
                                       (lambda ()
                                         (loop until start do (bt2:thread-yield))
-                                        (coerce (encode \"中文\" :encoding \"big5\") 'list))))))
+                                        (coerce (encode text :encoding \"big5\") 'list))))))
          (setf start t)
          (list (mapcar #'bt2:join-thread threads) *charset-systems-loaded*))"
       (quote
