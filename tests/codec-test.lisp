@@ -80,7 +80,7 @@
                                    :encoding :base64))))
 
 (deftest unknown-encoding
-  (ok (signals (encode "hi" :encoding :nope) 'encoding-transcode-error))
+  (ok (signals (encode "hi" :encoding :nope) 'encoding-unknown-encoding))
   (ok (signals (encode #(1)) 'encoding-encode-error)))
 
 (deftest wrap-columns
