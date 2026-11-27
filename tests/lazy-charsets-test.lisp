@@ -69,6 +69,30 @@
           (with-standard-io-syntax (prin1-to-string (source-registry)))
           form *result-marker*))
 
+(deftest zz-windows-diagnostic
+  ;; Temporary: which way of starting the child works on Windows CI.
+  #+sbcl
+  (let* ((runtime (uiop:native-namestring sb-ext:*runtime-pathname*))
+         (core (uiop:native-namestring sb-ext:*core-pathname*))
+         (true-core (uiop:native-namestring (truename sb-ext:*core-pathname*)))
+         (heap (format nil "~DMB" (floor (sb-ext:dynamic-space-size) (* 1024 1024))))
+         (variants
+           (list (list runtime "--version")
+                 (list runtime "--core" core "--version")
+                 (list runtime "--core" true-core "--version")
+                 (list runtime "--core" true-core "--noinform" "--non-interactive"
+                       "--eval" "(sb-ext:exit :code 3)")
+                 (list runtime "--core" true-core "--noinform" "--dynamic-space-size" heap
+                       "--non-interactive" "--no-sysinit" "--no-userinit"
+                       "--eval" "(sb-ext:exit :code 3)"))))
+    (dolist (v variants)
+      (multiple-value-bind (out err code)
+          (uiop:run-program v :output :string :error-output :string :ignore-error-status t)
+        (format t "~&DIAG ~S => ~S ~S ~S~%" v code
+                (subseq out 0 (min 300 (length out)))
+                (subseq err 0 (min 300 (length err)))))))
+  (ok t))
+
 (defun run-in-fresh-image (form)
   "Evaluate FORM (a string, read in ENCODING-PROTOCOL) in a fresh SBCL; its
    printed result, or (:CHILD-FAILED exit-code stdout stderr) when it did not
