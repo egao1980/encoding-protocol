@@ -35,6 +35,10 @@
            #:rfc4648-serdes-backend
            #:make-rfc4648-serdes-backend
            #:use-rfc4648-serdes-backend
-           #:encoding-unknown-encoding-system))
+           #:encoding-unknown-encoding-system
+           #:encoding-unknown-encoding-load-error
+           #:*auto-load-charsets*
+           #:load-charsets
+           #:load-charset-system))
 
 (in-package #:encoding-protocol)

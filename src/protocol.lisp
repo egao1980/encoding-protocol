@@ -93,12 +93,20 @@
   "Encoding-key → canonical keyword (transfer encodings and charset aliases).")
 
 (defparameter *optional-charsets*
-  '((:iso-2022-jp . "encoding-protocol/cjk")
-    (:big5 . "encoding-protocol/cjk")
-    (:euc-kr . "encoding-protocol/cjk")
-    (:cp949 . "encoding-protocol/cjk")
-    (:gb18030 . "encoding-protocol/cjk"))
-  "Charset keyword → ASDF system that registers it with Babel when loaded.")
+  '((:iso-2022-jp . "encoding-protocol/iso-2022-jp")
+    (:big5 . "encoding-protocol/big5")
+    (:euc-kr . "encoding-protocol/euc-kr")
+    (:cp949 . "encoding-protocol/euc-kr")
+    (:gb18030 . "encoding-protocol/gb18030"))
+  "Charset keyword → ASDF system that registers it with Babel when loaded.
+   encoding-protocol/cjk depends on all of them.")
+
+(defvar *auto-load-charsets* t
+  "True (the default): ENCODE, DECODE and NORMALIZE-ENCODING load the ASDF
+   system of a charset in *OPTIONAL-CHARSETS* the first time it is used. NIL:
+   they do not; ENCODE / DECODE signal ENCODING-UNKNOWN-ENCODING naming the
+   system (its LOAD-CHARSET-SYSTEM restart still loads it), and
+   NORMALIZE-ENCODING returns the system as its second value.")
 
 (defvar *babel-encoding-names* nil
   "(count . table): Babel names and aliases by encoding key, rebuilt when the
@@ -131,28 +139,54 @@
   (let ((system (cdr (assoc encoding *optional-charsets*))))
     (and system (not (%babel-encoding-p encoding)) system)))
 
-(defun normalize-encoding (encoding)
-  "Canonical keyword for ENCODING (string, symbol or NIL).
-   Names match case-insensitively and ignore punctuation, so \"Shift_JIS\",
-   \"shift-jis\" and :SJIS are one name. Charset aliases resolve to the Babel
-   encoding (\"shift_jis\" → :CP932, \"gb2312\" → :GBK). An unknown name comes
-   back as a keyword; ENCODE / DECODE signal ENCODING-UNKNOWN-ENCODING for it.
-   Second value: the ASDF system to load when the charset is defined by one that
-   is not loaded (\"big5\" → :BIG5, \"encoding-protocol/cjk\"), else NIL."
+(defun %normalize-name (encoding)
+  "Canonical keyword for ENCODING, loading nothing (see NORMALIZE-ENCODING)."
   (flet ((resolve (name)
            (let ((key (%encoding-key name)))
              (or (gethash key *encoding-aliases*)
                  (and (string/= key "") (gethash key (%babel-encoding-names)))
                  (intern (string-upcase (string-trim '(#\Space #\Tab) name))
                          :keyword)))))
-    (let ((keyword (etypecase encoding
-                     (null :utf-8)
-                     (string (resolve encoding))
-                     (symbol (resolve (symbol-name encoding))))))
-      (values keyword (%missing-charset-system keyword)))))
+    (etypecase encoding
+      (null :utf-8)
+      (string (resolve encoding))
+      (symbol (resolve (symbol-name encoding))))))
+
+(defun normalize-encoding (encoding)
+  "Canonical keyword for ENCODING (string, symbol or NIL).
+   Names match case-insensitively and ignore punctuation, so \"Shift_JIS\",
+   \"shift-jis\" and :SJIS are one name. Charset aliases resolve to the Babel
+   encoding (\"shift_jis\" → :CP932, \"gb2312\" → :GBK). An unknown name comes
+   back as a keyword; ENCODE / DECODE signal ENCODING-UNKNOWN-ENCODING for it.
+   A charset defined by an ASDF system that is not loaded (\"big5\" →
+   encoding-protocol/big5) is loaded now when *AUTO-LOAD-CHARSETS* is true.
+   Second value: that system when it is still not loaded (*AUTO-LOAD-CHARSETS*
+   NIL), else NIL.
+   A failed load signals ENCODING-UNKNOWN-ENCODING (system and load error) with
+   restarts LOAD-CHARSET-SYSTEM (try again), USE-VALUE (another name) and
+   CONTINUE (return the keyword and the system, unloaded)."
+  (let ((keyword (%normalize-name encoding))
+        (force nil))
+    (loop
+      (multiple-value-bind (system failure) (%charset-load-failure keyword force)
+        (unless failure
+          (return (values keyword system)))
+        (restart-case (error (%unknown-encoding keyword system failure))
+          (load-charset-system ()
+            :report (lambda (stream) (format stream "Load ~A again" system))
+            (setf force t))
+          (use-value (value)
+            :report "Use another encoding"
+            :interactive %read-encoding
+            (setf keyword (%normalize-name value) force nil))
+          (continue ()
+            :report (lambda (stream) (format stream "Return ~S with ~A unloaded" keyword system))
+            (return (values keyword system))))))))
 
 (defun %resolved-encoding (encoding)
-  (normalize-encoding
+  ;; Loading a charset system waits for %TEXT-ENCODING: transfer encodings
+  ;; never need one.
+  (%normalize-name
    (or encoding
        (and *encoding-backend* (encoding-backend-encoding *encoding-backend*))
        *encoding*)))
@@ -177,28 +211,26 @@
     (*encoding-backend* (encoding-backend-strict *encoding-backend*))
     (t nil)))
 
-(defun %text-encoding (encoding)
-  "ENCODING when Babel knows it, else signal ENCODING-UNKNOWN-ENCODING (naming
-   the ASDF system that defines it, if any). USE-VALUE supplies another encoding
-   name (normalized and checked again)."
+(defun %text-encoding (encoding &optional force)
+  "ENCODING when Babel knows it, after loading the ASDF system that defines it
+   if needed (*AUTO-LOAD-CHARSETS*, or FORCE). Else signal
+   ENCODING-UNKNOWN-ENCODING (naming that system, and the load error when
+   loading failed) with restarts USE-VALUE (another encoding name, normalized
+   and checked again) and, when a system defines ENCODING, LOAD-CHARSET-SYSTEM
+   (load it and retry)."
   (loop
-    (when (%babel-encoding-p encoding)
-      (return encoding))
-    (let ((system (%missing-charset-system encoding)))
-      (restart-case
-          (error 'encoding-unknown-encoding
-                 :encoding encoding
-                 :system system
-                 :message (if system
-                              "defined by a system that is not loaded"
-                              "no Babel character encoding by that name"))
+    (multiple-value-bind (system failure) (%charset-load-failure encoding force)
+      (when (%babel-encoding-p encoding)
+        (return encoding))
+      (restart-case (error (%unknown-encoding encoding system failure))
+        (load-charset-system ()
+          :report (lambda (stream) (format stream "Load ~A and retry" system))
+          :test (lambda (condition) (declare (ignore condition)) system)
+          (setf force t))
         (use-value (value)
           :report "Use another encoding"
-          :interactive (lambda ()
-                         (format *query-io* "Encoding: ")
-                         (force-output *query-io*)
-                         (list (read *query-io*)))
-          (setf encoding (normalize-encoding value)))))))
+          :interactive %read-encoding
+          (setf encoding (%normalize-name value)))))))
 
 (defun %unencodable-index (string encoding)
   "Index of the first character of STRING that ENCODING cannot encode, or NIL."

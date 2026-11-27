@@ -9,7 +9,7 @@ Run from the repository root:
 
 Writes:
   src/single-byte-tables.lisp   core system: windows-125x, cp866, mac-roman, tis-620, cp874
-  src/cjk/*-table.lisp          encoding-protocol/cjk: JIS X 0208, big5, euc-kr, cp949, gb18030
+  src/cjk/*-table.lisp          encoding-protocol/{iso-2022-jp,big5,euc-kr,gb18030}: JIS X 0208, big5, euc-kr, cp949, gb18030
   tests/fixtures/*.sexp         Python's answers, read by the Rove tests
 
 Each table is the decode table plus the encoder's exceptions ("overrides") to

@@ -211,19 +211,39 @@
     (ok (equalp (octets 97 98) (encode (coerce "ab" 'simple-base-string) :encoding name)))))
 
 (deftest optional-charset-system
-  (testing "a charset from a system that is not loaded names that system"
+  (testing "with *auto-load-charsets* NIL, a charset from a system that is not loaded names that system"
     (let ((encoding-protocol::*optional-charsets*
             (acons :x-test-charset "encoding-protocol/x-test"
-                   encoding-protocol::*optional-charsets*)))
+                   encoding-protocol::*optional-charsets*))
+          (*auto-load-charsets* nil))
       (ok (equal "encoding-protocol/x-test"
                  (nth-value 1 (normalize-encoding "x-test-charset"))))
       (ok (signals (encode "a" :encoding "x-test-charset") 'encoding-unknown-encoding))
       (handler-case (decode (octets 97) :encoding "x-test-charset")
         (encoding-unknown-encoding (e)
           (ok (equal "encoding-protocol/x-test" (encoding-unknown-encoding-system e)))
+          (ok (null (encoding-unknown-encoding-load-error e)))
           (ok (search "encoding-protocol/x-test" (princ-to-string e)))))))
+  (testing "auto-loading a system ASDF cannot find signals the typed condition"
+    (let ((encoding-protocol::*optional-charsets*
+            (acons :x-test-charset "encoding-protocol/x-test"
+                   encoding-protocol::*optional-charsets*)))
+      (handler-case (encode "a" :encoding "x-test-charset")
+        (encoding-unknown-encoding (e)
+          (ok (equal "encoding-protocol/x-test" (encoding-unknown-encoding-system e)))
+          (ok (typep (encoding-unknown-encoding-load-error e) 'asdf:missing-component))
+          (ok (search "loading \"encoding-protocol/x-test\" failed" (princ-to-string e)))))
+      (ok (signals (normalize-encoding "x-test-charset") 'encoding-unknown-encoding))
+      (ok (equal '(:x-test-charset "encoding-protocol/x-test")
+                 (handler-bind ((encoding-unknown-encoding #'continue))
+                   (multiple-value-list (normalize-encoding "x-test-charset")))))
+      (ok (equalp (octets 97)
+                  (handler-bind ((encoding-unknown-encoding
+                                   (lambda (e) (use-value :ascii e))))
+                    (encode "a" :encoding "x-test-charset"))))))
   (testing "a charset with no providing system has no system"
     (ok (null (nth-value 1 (normalize-encoding "x-no-such-charset"))))
     (handler-case (encode "a" :encoding "x-no-such-charset")
       (encoding-unknown-encoding (e)
-        (ok (null (encoding-unknown-encoding-system e)))))))
+        (ok (null (encoding-unknown-encoding-system e)))
+        (ok (null (encoding-unknown-encoding-load-error e)))))))
