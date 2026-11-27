@@ -66,11 +66,39 @@
                          "cseucpkdfmtjapanese")
                  ;; GBK is a superset of GB2312 (EUC-CN): same octets for GB2312 text.
                  (:gbk "gb2312" "csgb2312" "gb2312-80" "euc-cn" "euccn" "x-euc-cn"
-                       "chinese" "gbk" "x-gbk" "cp936" "ms936" "windows-936"))
+                       "chinese" "gbk" "x-gbk" "cp936" "ms936" "windows-936")
+                 ;; Single-byte charsets defined here (single-byte-charsets.lisp).
+                 (:cp1250 "windows-1250" "cp1250" "x-cp1250" "1250")
+                 (:cp1253 "windows-1253" "cp1253" "x-cp1253" "1253")
+                 (:cp1254 "windows-1254" "cp1254" "x-cp1254" "1254")
+                 (:cp1255 "windows-1255" "cp1255" "x-cp1255" "1255")
+                 (:cp1256 "windows-1256" "cp1256" "x-cp1256" "1256")
+                 (:cp1257 "windows-1257" "cp1257" "x-cp1257" "1257")
+                 (:cp1258 "windows-1258" "cp1258" "x-cp1258" "1258")
+                 (:cp866 "cp866" "866" "ibm866" "csibm866")
+                 (:mac-roman "mac-roman" "macroman" "macintosh" "mac" "csmacintosh" "x-mac-roman")
+                 (:tis-620 "tis-620" "tis620" "tis_620_0" "tis_620_2529_0" "tis_620_2529_1" "iso_ir_166")
+                 (:cp874 "cp874" "windows-874" "ms874" "x-cp874")
+                 ;; Multibyte charsets from encoding-protocol/cjk.
+                 (:iso-2022-jp "iso-2022-jp" "iso2022jp" "csiso2022jp")
+                 (:big5 "big5" "big5-tw" "csbig5" "cn-big5" "x-x-big5")
+                 (:euc-kr "euc-kr" "euckr" "cseuckr" "ks_x_1001" "ksx1001")
+                 ;; Mail labelled ks_c_5601-1987 is CP949 (WHATWG agrees).
+                 (:cp949 "cp949" "949" "ms949" "uhc" "windows-949" "ks_c_5601-1987" "ks_c_5601-1989"
+                         "ks_c_5601" "ksc5601" "korean" "csksc56011987" "iso-ir-149")
+                 (:gb18030 "gb18030" "gb18030-2000"))
           do (dolist (name names)
                (setf (gethash (%encoding-key name) table) target)))
     table)
   "Encoding-key → canonical keyword (transfer encodings and charset aliases).")
+
+(defparameter *optional-charsets*
+  '((:iso-2022-jp . "encoding-protocol/cjk")
+    (:big5 . "encoding-protocol/cjk")
+    (:euc-kr . "encoding-protocol/cjk")
+    (:cp949 . "encoding-protocol/cjk")
+    (:gb18030 . "encoding-protocol/cjk"))
+  "Charset keyword → ASDF system that registers it with Babel when loaded.")
 
 (defvar *babel-encoding-names* nil
   "(count . table): Babel names and aliases by encoding key, rebuilt when the
@@ -98,22 +126,30 @@
                                     (babel-encodings:get-character-encoding name))))
               t))))
 
+(defun %missing-charset-system (encoding)
+  "ASDF system that would define charset ENCODING, when Babel lacks it."
+  (let ((system (cdr (assoc encoding *optional-charsets*))))
+    (and system (not (%babel-encoding-p encoding)) system)))
+
 (defun normalize-encoding (encoding)
   "Canonical keyword for ENCODING (string, symbol or NIL).
    Names match case-insensitively and ignore punctuation, so \"Shift_JIS\",
    \"shift-jis\" and :SJIS are one name. Charset aliases resolve to the Babel
    encoding (\"shift_jis\" → :CP932, \"gb2312\" → :GBK). An unknown name comes
-   back as a keyword; ENCODE / DECODE signal ENCODING-UNKNOWN-ENCODING for it."
+   back as a keyword; ENCODE / DECODE signal ENCODING-UNKNOWN-ENCODING for it.
+   Second value: the ASDF system to load when the charset is defined by one that
+   is not loaded (\"big5\" → :BIG5, \"encoding-protocol/cjk\"), else NIL."
   (flet ((resolve (name)
            (let ((key (%encoding-key name)))
              (or (gethash key *encoding-aliases*)
                  (and (string/= key "") (gethash key (%babel-encoding-names)))
                  (intern (string-upcase (string-trim '(#\Space #\Tab) name))
                          :keyword)))))
-    (etypecase encoding
-      (null :utf-8)
-      (string (resolve encoding))
-      (symbol (resolve (symbol-name encoding))))))
+    (let ((keyword (etypecase encoding
+                     (null :utf-8)
+                     (string (resolve encoding))
+                     (symbol (resolve (symbol-name encoding))))))
+      (values keyword (%missing-charset-system keyword)))))
 
 (defun %resolved-encoding (encoding)
   (normalize-encoding
@@ -142,22 +178,27 @@
     (t nil)))
 
 (defun %text-encoding (encoding)
-  "ENCODING when Babel knows it, else signal ENCODING-UNKNOWN-ENCODING.
-   USE-VALUE supplies another encoding name (normalized and checked again)."
+  "ENCODING when Babel knows it, else signal ENCODING-UNKNOWN-ENCODING (naming
+   the ASDF system that defines it, if any). USE-VALUE supplies another encoding
+   name (normalized and checked again)."
   (loop
     (when (%babel-encoding-p encoding)
       (return encoding))
-    (restart-case
-        (error 'encoding-unknown-encoding
-               :encoding encoding
-               :message "no Babel character encoding by that name")
-      (use-value (value)
-        :report "Use another encoding"
-        :interactive (lambda ()
-                       (format *query-io* "Encoding: ")
-                       (force-output *query-io*)
-                       (list (read *query-io*)))
-        (setf encoding (normalize-encoding value))))))
+    (let ((system (%missing-charset-system encoding)))
+      (restart-case
+          (error 'encoding-unknown-encoding
+                 :encoding encoding
+                 :system system
+                 :message (if system
+                              "defined by a system that is not loaded"
+                              "no Babel character encoding by that name"))
+        (use-value (value)
+          :report "Use another encoding"
+          :interactive (lambda ()
+                         (format *query-io* "Encoding: ")
+                         (force-output *query-io*)
+                         (list (read *query-io*)))
+          (setf encoding (normalize-encoding value)))))))
 
 (defun %unencodable-index (string encoding)
   "Index of the first character of STRING that ENCODING cannot encode, or NIL."

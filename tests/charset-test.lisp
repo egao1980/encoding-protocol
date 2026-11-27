@@ -64,8 +64,8 @@
 
 (deftest-parametrize charset-unknown
     ((name)
-     :ids ("big5" "iso-2022-jp" "nonsense" "keyword")
-     ("big5") ("iso-2022-jp") ("x-no-such-charset") (:big5))
+     :ids ("hz-gb-2312" "utf-7" "nonsense" "keyword")
+     ("hz-gb-2312") ("utf-7") ("x-no-such-charset") (:big5-hkscs))
   (ok (signals (encode "abc" :encoding name) 'encoding-unknown-encoding))
   (ok (signals (decode (octets 97 98) :encoding name) 'encoding-unknown-encoding))
   (handler-case (encode "abc" :encoding name)
@@ -77,4 +77,4 @@
   (ok (string= "ab"
                (handler-bind ((encoding-unknown-encoding
                                 (lambda (c) (use-value :iso-8859-1 c))))
-                 (decode (octets 97 98) :encoding "big5")))))
+                 (decode (octets 97 98) :encoding "utf-7")))))
