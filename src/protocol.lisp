@@ -89,9 +89,14 @@
           table))))
 
 (defun %babel-encoding-p (encoding)
+  "True when ENCODING is a Babel encoding name or alias keyword."
   (and (keywordp encoding)
-       (ignore-errors (babel-encodings:get-character-encoding encoding))
-       t))
+       (let ((name (gethash (%encoding-key encoding) (%babel-encoding-names))))
+         (and name
+              (or (eq name encoding)
+                  (member encoding (babel-encodings:enc-aliases
+                                    (babel-encodings:get-character-encoding name))))
+              t))))
 
 (defun normalize-encoding (encoding)
   "Canonical keyword for ENCODING (string, symbol or NIL).
@@ -158,9 +163,11 @@
   "Index of the first character of STRING that ENCODING cannot encode, or NIL."
   (loop for i from 0
         for ch across string
-        unless (ignore-errors
-                 (babel:string-to-octets (string ch) :encoding encoding)
-                 t)
+        unless (handler-case
+                   (progn (babel:string-to-octets (string ch) :encoding encoding) t)
+                 ;; Not only CHARACTER-CODING-ERROR: Babel 0.5.0 signals
+                 ;; (ERROR T …) for KOI8 and TYPE-ERROR for CP932 / EUC-JP (#9).
+                 (error () nil))
           return i))
 
 (defun %babel-string-to-octets (string encoding)
