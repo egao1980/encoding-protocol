@@ -1,5 +1,5 @@
 (defsystem "encoding-protocol"
-  :version "0.5.0"
+  :version "0.6.0"
   :description "Text (UTF-8 default) + transfer encodings for cl-stack (RFC 4648, QP, RLE, RFC 3986 percent)"
   :author "egao1980"
   :license "MIT"
