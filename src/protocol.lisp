@@ -108,12 +108,37 @@
    system (its LOAD-CHARSET-SYSTEM restart still loads it), and
    NORMALIZE-ENCODING returns the system as its second value.")
 
+(defvar *private-babel-encodings* '()
+  "Encodings this library defines in Babel: resolvable by name
+   (BABEL-ENCODINGS:GET-CHARACTER-ENCODING), but kept out of
+   BABEL-ENCODINGS:LIST-CHARACTER-ENCODINGS. Other libraries expand Babel's
+   INSTANTIATE-CONCRETE-MAPPINGS over that list at compile time (cffi's
+   strings.lisp does); a fasl compiled after this library loaded would name
+   our charsets and fail to load where it is not loaded (cl-repository#217).")
+
+(defun %hide-from-babel-list (name)
+  "Register NAME as private (see *PRIVATE-BABEL-ENCODINGS*). Called right
+   after each BABEL-ENCODINGS::DEFINE-CHARACTER-ENCODING of ours."
+  (pushnew name *private-babel-encodings*)
+  (setf babel-encodings::*supported-character-encodings*
+        (remove name babel-encodings::*supported-character-encodings*))
+  name)
+
+(defun %hide-abstract-mappings (names)
+  "Remove NAMES' abstract mappings from Babel's *ABSTRACT-MAPPINGS* (see
+   REGISTER-BABEL-CHARSETS)."
+  (dolist (name names names)
+    (remhash name babel-encodings::*abstract-mappings*)))
+
+(defun %babel-and-private-encodings ()
+  (append (babel-encodings:list-character-encodings) *private-babel-encodings*))
+
 (defvar *babel-encoding-names* nil
   "(count . table): Babel names and aliases by encoding key, rebuilt when the
    number of Babel encodings changes.")
 
 (defun %babel-encoding-names ()
-  (let ((names (babel-encodings:list-character-encodings)))
+  (let ((names (%babel-and-private-encodings)))
     (if (eql (car *babel-encoding-names*) (length names))
         (cdr *babel-encoding-names*)
         (let ((table (make-hash-table :test 'equal)))

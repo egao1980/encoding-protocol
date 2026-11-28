@@ -247,3 +247,20 @@
       (encoding-unknown-encoding (e)
         (ok (null (encoding-unknown-encoding-system e)))
         (ok (null (encoding-unknown-encoding-load-error e)))))))
+
+(deftest our-charsets-stay-out-of-babels-enumerated-list
+  "cl-repository#217: cffi's strings.lisp expands
+   INSTANTIATE-CONCRETE-MAPPINGS over LIST-CHARACTER-ENCODINGS at compile
+   time. If our charsets were listed there, cffi compiled after this library
+   loaded would name :cp874 and fail to load in an image without it."
+  (let ((listed (babel-encodings:list-character-encodings)))
+    (dolist (name encoding-protocol::*private-babel-encodings*)
+      (ok (not (member name listed)) (format nil "~(~a~) not enumerated" name))
+      (ok (babel-encodings:get-character-encoding name) (format nil "~(~a~) still resolves" name))))
+  (let ((abstract (alexandria:hash-table-keys babel-encodings::*abstract-mappings*)))
+    (dolist (name encoding-protocol::*private-babel-encodings*)
+      (ok (not (member name abstract))
+          (format nil "~(~a~) has no abstract mapping (INSTANTIATE-CONCRETE-MAPPINGS default)" name))))
+  (ok (member :cp874 encoding-protocol::*private-babel-encodings*))
+  (ok (equal "ก" (babel:octets-to-string (coerce #(#xa1) '(vector (unsigned-byte 8))) :encoding :cp874))
+      "decoding through Babel by name still works"))
