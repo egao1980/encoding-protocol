@@ -253,6 +253,7 @@
        :aliases ',aliases
        :max-units-per-char ,max-units-per-char
        :literal-char-code-limit ,literal-char-code-limit)
+     (%hide-from-babel-list ,name)
      (babel-encodings::define-decoder ,name (getter src-type setter dest-type)
        (%decoder-template ',decoder ',charset getter src-type setter dest-type))
      (babel-encodings::define-code-point-counter ,name (getter type)
@@ -269,6 +270,7 @@
      (babel-encodings::define-character-encoding ,name ,documentation
        :aliases ',aliases
        :literal-char-code-limit #x80)
+     (%hide-from-babel-list ,name)
      (babel-encodings::define-unibyte-decoder ,name (octet)
        (if (< octet #x80)
            octet
@@ -327,4 +329,11 @@
        :code-point-seq-getter %string-get
        :code-point-seq-setter %string-set
        :code-point-seq-type simple-base-string))
+     ;; Last, after the expansions above used them: Babel's
+     ;; INSTANTIATE-CONCRETE-MAPPINGS defaults to every *ABSTRACT-MAPPINGS*
+     ;; key, so other libraries compiled later would bake our names into
+     ;; their fasls (cffi's strings.lisp; cl-repository#217). Our concrete
+     ;; mappings, added above, are what Babel decodes and encodes with.
+     (eval-when (:compile-toplevel :load-toplevel :execute)
+       (%hide-abstract-mappings ',names))
      ',names))
