@@ -131,6 +131,23 @@
   (ok (eq :base16 (normalize-encoding :hex)))
   (ok (eq :base32hex (normalize-encoding "base32-hex"))))
 
+(deftest find-encoding-resolves-known-names
+  (ok (eq :cp932 (find-encoding "Shift_JIS")))
+  (ok (eq :gbk (find-encoding "gb2312")))
+  (ok (eq :eucjp (find-encoding "EUC-JP")))
+  (ok (eq :cp932 (find-encoding "windows-31j")))
+  (ok (eq :utf-8 (find-encoding :utf8)))
+  (ok (eq :base64 (find-encoding "b64")))
+  (ok (eq :big5 (find-encoding "big5"))))
+
+(deftest find-encoding-never-interns
+  (let ((name (format nil "x-no-such-charset-~36R" (random (expt 36 8)))))
+    (ok (null (find-encoding name)))
+    (ok (null (find-encoding (make-symbol name))))
+    (ok (null (find-symbol (string-upcase name) :keyword)))
+    (ok (null (find-encoding "")))
+    (ok (null (find-encoding nil)))))
+
 (deftest default-utf-8
   (let ((octets (encode "hello")))
     (ok (equalp #(104 101 108 108 111) octets))

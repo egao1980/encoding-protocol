@@ -139,16 +139,19 @@
   (let ((system (cdr (assoc encoding *optional-charsets*))))
     (and system (not (%babel-encoding-p encoding)) system)))
 
-(defun %normalize-name (encoding)
-  "Canonical keyword for ENCODING, loading nothing (see NORMALIZE-ENCODING)."
+(defun %normalize-name (encoding &optional (intern t))
+  "Canonical keyword for ENCODING, loading nothing (see NORMALIZE-ENCODING).
+   A name that is neither an alias nor a Babel name is interned as a keyword,
+   or, when INTERN is NIL, gives NIL."
   (flet ((resolve (name)
            (let ((key (%encoding-key name)))
              (or (gethash key *encoding-aliases*)
                  (and (string/= key "") (gethash key (%babel-encoding-names)))
-                 (intern (string-upcase (string-trim '(#\Space #\Tab) name))
-                         :keyword)))))
+                 (and intern
+                      (intern (string-upcase (string-trim '(#\Space #\Tab) name))
+                              :keyword))))))
     (etypecase encoding
-      (null :utf-8)
+      (null (and intern :utf-8))
       (string (resolve encoding))
       (symbol (resolve (symbol-name encoding))))))
 
@@ -182,6 +185,17 @@
           (continue ()
             :report (lambda (stream) (format stream "Return ~S with ~A unloaded" keyword system))
             (return (values keyword system))))))))
+
+(defun find-encoding (name)
+  "Canonical keyword for the encoding NAME (string or symbol) names, as
+   NORMALIZE-ENCODING gives it, or NIL when no encoding has that name (NIL and
+   \"\" name none). Never interns a symbol, so NAME may come from untrusted
+   input (a MIME charset parameter). A charset defined by an ASDF system that
+   is not loaded loads as NORMALIZE-ENCODING loads it, with the same
+   ENCODING-UNKNOWN-ENCODING and restarts when that fails; second value: that
+   system when it is still not loaded (*AUTO-LOAD-CHARSETS* NIL)."
+  (let ((keyword (%normalize-name name nil)))
+    (and keyword (normalize-encoding keyword))))
 
 (defun %resolved-encoding (encoding)
   ;; Loading a charset system waits for %TEXT-ENCODING: transfer encodings

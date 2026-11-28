@@ -39,6 +39,7 @@
            #:encoding-unknown-encoding-load-error
            #:*auto-load-charsets*
            #:load-charsets
-           #:load-charset-system))
+           #:load-charset-system
+           #:find-encoding))
 
 (in-package #:encoding-protocol)

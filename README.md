@@ -68,6 +68,13 @@ A malformed escape, a non-ASCII input character or invalid UTF-8 signals `encodi
 | `:mac-roman` | `macintosh` `mac-roman` `macroman` `csmacintosh` |
 | `:tis-620` / `:cp874` | `tis-620` `tis620` `iso-ir-166` / `windows-874` `ms874` |
 
+`normalize-encoding` interns an unknown name as a keyword, so `encode` / `decode` can name it in `encoding-unknown-encoding`. For a name from untrusted input (a MIME `charset` parameter, an HTTP header) use `find-encoding` (0.6.0): the same canonical keyword, or `nil` when no encoding has that name, and it never interns a symbol. It loads an optional charset's system like `normalize-encoding`.
+
+```lisp
+(find-encoding "Shift_JIS")        ; => :CP932
+(find-encoding "x-no-such-charset") ; => NIL, nothing interned
+```
+
 `shift_jis` decodes and encodes as Windows-31J (CP932), the variant mail clients send. `gb2312` uses GBK, a superset: GB2312 text gives the same octets. Babel's EUC-JP has no JIS X 0212, so `é` does not encode (Python gives three octets).
 
 The multibyte charsets below are optional: each lives in its own secondary system, loaded on first use.
